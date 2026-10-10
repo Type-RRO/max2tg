@@ -41,40 +41,91 @@
 
 ---
 
-### 2. Запуск локально (Python)
+### 2. Запуск
 
+#### Вариант 1: Быстрый запуск через Docker Compose (рекомендуется)
+
+Вам даже не нужно клонировать весь репозиторий — образ уже собран и готов к работе в GitHub Container Registry (`ghcr.io/type-rro/max2tg:latest`).
+
+1. Создайте рабочую папку и перейдите в неё:
+   ```bash
+   mkdir max2tg && cd max2tg
+   ```
+
+2. Скачайте `docker-compose.yml` одной командой:
+   ```bash
+   curl -O https://raw.githubusercontent.com/Type-RRO/max2tg/main/docker-compose.yml
+   ```
+   *(Либо создайте файл `docker-compose.yml` вручную и вставьте содержимое:)*
+   ```yaml
+   services:
+     max2tg:
+       image: ghcr.io/type-rro/max2tg:latest
+       container_name: max2tg
+       restart: unless-stopped
+       env_file:
+         - .env
+       environment:
+         - PYTHONUNBUFFERED=1
+         - LOG_DIR=/app/logs
+         - DATA_DIR=/app/data
+       volumes:
+         - ./logs:/app/logs
+         - ./data:/app/data
+   ```
+
+3. Скачайте шаблон конфигурации и укажите свои токены:
+   ```bash
+   curl -o .env https://raw.githubusercontent.com/Type-RRO/max2tg/main/.env.example
+   nano .env   # укажите MAX_TOKEN, MAX_DEVICE_ID, TG_BOT_TOKEN, TG_CHAT_ID
+   ```
+
+4. Запустите контейнер:
+   ```bash
+   docker compose up -d
+   ```
+
+Полезные команды:
 ```bash
-# Клонирование репозитория
-git clone https://github.com/type-rro/max2tg.git
-cd max2tg
+# Просмотр логов в реальном времени
+docker compose logs -f
 
-# Создание виртуального окружения и установка зависимостей
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Перезапуск
+docker compose restart
 
-# Настройка конфигурации
-cp .env.example .env
-nano .env  # укажите ваши токены
-
-# Запуск
-python -m app.main
+# Остановка
+docker compose down
 ```
+
+> **Персистентность данных:** Все данные бота (файлы тем, история, карта связки сообщений) автоматически сохраняются на вашем хосте в папку `./data`, а логи — в `./logs`.
 
 ---
 
-### 3. Запуск через Docker
+#### Вариант 2: Локально из исходников (Python)
 
-```bash
-cp .env.example .env
-nano .env
+1. Клонируйте репозиторий:
+   ```bash
+   git clone https://github.com/Type-RRO/max2tg.git
+   cd max2tg
+   ```
 
-# Сборка и запуск контейнера
-docker compose up -d --build
+2. Создайте виртуальное окружение и установите зависимости:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
 
-# Просмотр логов
-docker compose logs -f
-```
+3. Настройте конфигурацию:
+   ```bash
+   cp .env.example .env
+   nano .env  # укажите ваши токены
+   ```
+
+4. Запустите:
+   ```bash
+   python -m app.main
+   ```
 
 ---
 

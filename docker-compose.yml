@@ -1,21 +1,14 @@
-version: '3.5'
-
 services:
   max2tg:
-    build: .
     image: ghcr.io/type-rro/max2tg:latest
+    container_name: max2tg
     restart: unless-stopped
     env_file:
-      - ./.env
+      - .env
     environment:
-      LOG_DIR: /app/logs
+      - PYTHONUNBUFFERED=1
+      - LOG_DIR=/app/logs
+      - DATA_DIR=/app/data
     volumes:
       - ./logs:/app/logs
-      - ./topics.json:/app/topics.json
-      - ./seen_messages.json:/app/seen_messages.json
-      - ./messages_map.json:/app/messages_map.json
-    ulimits:
-      nproc: 65535
-      nofile:
-        soft: 65535
-        hard: 65535
+      - ./data:/app/data

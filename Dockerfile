@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --default-timeout=100 -i https://mirror.yandex.ru/pypi/simple -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
