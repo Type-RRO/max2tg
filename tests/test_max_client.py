@@ -498,6 +498,30 @@ class TestSendMessageAttaches:
         await client.send_message(42, "hi")
 
         assert "attaches" not in client.cmd.await_args.args[1]["message"]
+        assert "link" not in client.cmd.await_args.args[1]["message"]
+
+    @pytest.mark.asyncio
+    async def test_reply_to_id_included_as_reply_link(self):
+        client = MaxClient(token="tok", device_id="dev")
+        client.cmd = AsyncMock(return_value={"ok": True})
+
+        await client.send_message(42, "hi", reply_to_id="117417662947666912")
+
+        message = client.cmd.await_args.args[1]["message"]
+        assert message["link"] == {
+            "type": "REPLY",
+            "message": {"id": 117417662947666912},
+        }
+
+    @pytest.mark.asyncio
+    async def test_reply_to_id_preserves_non_digit_id(self):
+        client = MaxClient(token="tok", device_id="dev")
+        client.cmd = AsyncMock(return_value={"ok": True})
+
+        await client.send_message(42, "hi", reply_to_id="non_int_id")
+
+        message = client.cmd.await_args.args[1]["message"]
+        assert message["link"]["message"]["id"] == "non_int_id"
 
 
 # ---------------------------------------------------------------------------

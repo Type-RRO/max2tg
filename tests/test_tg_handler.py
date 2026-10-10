@@ -532,3 +532,140 @@ class TestOnMediaReply:
         await _on_media_reply(update, ctx)
 
         update.message.reply_text.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Forum Topic Direct Messages, Reply Tracking, and Reactions
+# ---------------------------------------------------------------------------
+
+class TestTopicMessagesAndReplies:
+    @pytest.mark.asyncio
+    async def test_direct_message_in_topic_forwards_to_max(self):
+        max_client = MagicMock()
+        max_client.send_message = AsyncMock(return_value={"ok": True})
+        topic_manager = MagicMock()
+        topic_manager.get_chat_id_by_thread.return_value = 521818779
+        topic_manager.get_chat_name.return_value = "Group Chat"
+
+        update = _make_message_update("Hello from keyboard", chat_type="supergroup")
+        update.effective_message = update.message
+        update.effective_message.message_thread_id = 7
+        update.effective_message.reply_to_message = None
+        update.effective_message.set_reaction = AsyncMock(return_value=True)
+
+        ctx = _make_context(
+            user_data={},
+            bot_data={"max_client": max_client, "topic_manager": topic_manager},
+        )
+
+        await _on_text_reply(update, ctx)
+
+        max_client.send_message.assert_called_once()
+        assert max_client.send_message.call_args[0][0] == 521818779
+        assert "Hello from keyboard" in max_client.send_message.call_args[0][1]
+        assert "reply_to_id" not in max_client.send_message.call_args.kwargs
+        update.effective_message.set_reaction.assert_awaited_once_with("👍")
+
+    @pytest.mark.asyncio
+    async def test_reply_to_message_in_topic_passes_max_reply_id(self):
+        max_client = MagicMock()
+        max_client.send_message = AsyncMock(return_value={"ok": True})
+        topic_manager = MagicMock()
+        topic_manager.get_chat_id_by_thread.return_value = 521818779
+
+        msg_map = MagicMock()
+        msg_map.get_max_id.return_value = "117269431514307080"
+
+        update = _make_message_update("Replying here", chat_type="supergroup")
+        update.effective_message = update.message
+        update.effective_message.message_thread_id = 7
+        update.effective_message.message_id = 500
+
+        # Replying to telegram message #123
+        reply_to = MagicMock()
+        reply_to.message_id = 123
+        reply_to.forum_topic_created = None
+        update.effective_message.reply_to_message = reply_to
+        update.effective_message.set_reaction = AsyncMock(return_value=True)
+
+        ctx = _make_context(
+            user_data={},
+            bot_data={
+                "max_client": max_client,
+                "topic_manager": topic_manager,
+                "msg_map": msg_map,
+                "delivery_reaction": "👍",
+            },
+        )
+
+        await _on_text_reply(update, ctx)
+
+        msg_map.get_max_id.assert_called_once_with(123)
+        max_client.send_message.assert_called_once()
+        assert max_client.send_message.call_args.kwargs["reply_to_id"] == "117269431514307080"
+        update.effective_message.set_reaction.assert_awaited_once_with("👍")
+
+    @pytest.mark.asyncio
+    async def test_reply_to_topic_root_is_not_treated_as_reply(self):
+        max_client = MagicMock()
+        max_client.send_message = AsyncMock(return_value={"ok": True})
+        topic_manager = MagicMock()
+        topic_manager.get_chat_id_by_thread.return_value = 521818779
+
+        msg_map = MagicMock()
+
+        update = _make_message_update("Topic message", chat_type="supergroup")
+        update.effective_message = update.message
+        update.effective_message.message_thread_id = 7
+
+        # In TG, topic messages sometimes reference the root topic creation message (message_id == 7)
+        reply_to = MagicMock()
+        reply_to.message_id = 7
+        reply_to.forum_topic_created = None
+        update.effective_message.reply_to_message = reply_to
+        update.effective_message.set_reaction = AsyncMock(return_value=True)
+
+        ctx = _make_context(
+            user_data={},
+            bot_data={
+                "max_client": max_client,
+                "topic_manager": topic_manager,
+                "msg_map": msg_map,
+            },
+        )
+
+        await _on_text_reply(update, ctx)
+
+        msg_map.get_max_id.assert_not_called()
+        assert "reply_to_id" not in max_client.send_message.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_delete_command_calls_max_delete_and_deletes_tg_messages(self):
+        from app.tg_handler import _on_delete_command
+
+        max_client = MagicMock()
+        max_client.delete_message = AsyncMock(return_value={"ok": True})
+        msg_map = MagicMock()
+        msg_map.get_max_id.return_value = "max_msg_999"
+        msg_map.get_chat_id.return_value = 12345
+
+        update = MagicMock()
+        cmd_msg = MagicMock()
+        cmd_msg.delete = AsyncMock()
+        cmd_msg.reply_text = AsyncMock()
+        cmd_msg.message_thread_id = None
+        target_msg = MagicMock()
+        target_msg.message_id = 456
+        target_msg.delete = AsyncMock()
+        cmd_msg.reply_to_message = target_msg
+        update.effective_message = cmd_msg
+
+        ctx = MagicMock()
+        ctx.bot_data = {"max_client": max_client, "msg_map": msg_map}
+
+        await _on_delete_command(update, ctx)
+
+        max_client.delete_message.assert_awaited_once_with(12345, "max_msg_999")
+        target_msg.delete.assert_awaited_once()
+        cmd_msg.delete.assert_awaited_once()
+

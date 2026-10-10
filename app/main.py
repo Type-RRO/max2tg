@@ -10,9 +10,12 @@ from telegram import Update
 from telegram.error import BadRequest, NetworkError
 
 from app.config import load_settings
+from app.history_syncer import HistorySyncer
 from app.max_listener import create_max_client
+from app.msg_mapper import MessageMapper
 from app.tg_handler import build_tg_app
 from app.tg_sender import TelegramSender
+from app.topic_manager import TopicManager
 
 threading.stack_size(524288)
 
@@ -104,17 +107,42 @@ async def main():
     )
     await sender.start()
 
+    topic_manager = TopicManager(
+        sender=sender,
+        topics_file=settings.topics_file,
+        enabled=settings.enable_topics,
+    )
+    if settings.enable_topics:
+        log.info("Forum topics enabled (topics_file=%s)", settings.topics_file)
+
+    syncer = HistorySyncer(
+        client=None,
+        resolver=None,
+        forward_message_cb=None,
+        seen_file=settings.seen_messages_file,
+        poll_interval=settings.history_poll_interval,
+        messages_count=settings.history_messages_count,
+    )
+
+    msg_map = MessageMapper(settings.messages_map_file)
+
     client = create_max_client(
         settings.max_token, settings.max_device_id, sender, settings.max_chat_ids,
         debug=settings.debug, reply_enabled=settings.reply_enabled, proxy_url=settings.max_proxy,
-        exclude_chat_ids=settings.max_exclude_chat_ids,
+        exclude_chat_ids=settings.max_exclude_chat_ids, topic_manager=topic_manager,
+        syncer=syncer, chats_count=settings.max_chats_count, msg_map=msg_map,
+        show_reply_button=settings.show_reply_button,
     )
 
     tg_app = None
     if settings.reply_enabled:
-        tg_app = build_tg_app(settings.tg_bot_token, client, settings.tg_chat_id,
-                              proxy_url=settings.tg_proxy, read_timeout=settings.tg_read_timeout, write_timeout=settings.tg_write_timeout,
-                              base_url=settings.tg_base_url)
+        tg_app = build_tg_app(
+            settings.tg_bot_token, client, settings.tg_chat_id,
+            proxy_url=settings.tg_proxy, read_timeout=settings.tg_read_timeout,
+            write_timeout=settings.tg_write_timeout, base_url=settings.tg_base_url,
+            topic_manager=topic_manager, msg_map=msg_map,
+            delivery_reaction=settings.delivery_reaction,
+        )
         await tg_app.initialize()
         await tg_app.start()
         await tg_app.updater.start_polling(
@@ -131,6 +159,8 @@ async def main():
         await client.run()
     finally:
         log.info("Shutting down...")
+        if syncer:
+            await syncer.stop()
         if tg_app:
             await tg_app.updater.stop()
             await tg_app.stop()

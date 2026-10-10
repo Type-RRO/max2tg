@@ -3,25 +3,17 @@ version: '3.5'
 services:
   max2tg:
     build: .
+    image: ghcr.io/type-rro/max2tg:latest
     restart: unless-stopped
+    env_file:
+      - ./.env
     environment:
-      MAX_TOKEN:
-      MAX_DEVICE_ID:
-      MAX_CHAT_IDS:
-      MAX_EXCLUDE_CHAT_IDS:
-      MAX_PROXY:
-      TG_BOT_TOKEN:
-      TG_CHAT_ID:
-      TG_PROXY:
-      TG_READ_TIMEOUT:
-      TG_WRITE_TIMEOUT:
-      TG_MEDIA_WRITE_TIMEOUT:
-      TG_BASE_URL:
-      DEBUG:
-      REPLY_ENABLED:
       LOG_DIR: /app/logs
     volumes:
       - ./logs:/app/logs
+      - ./topics.json:/app/topics.json
+      - ./seen_messages.json:/app/seen_messages.json
+      - ./messages_map.json:/app/messages_map.json
     ulimits:
       nproc: 65535
       nofile:

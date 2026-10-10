@@ -96,6 +96,7 @@ class OpCode(IntEnum):
     CHAT_GET = 48
     GET_MESSAGES = 49
     SEND_MESSAGE = 64
+    MSG_DELETE = 66
     EDIT_MESSAGE = 67
     GET_VIDEO_URL = 83
     FILE_UPLOAD = 87
@@ -127,11 +128,12 @@ class MaxClient:
     ATTACH_READY_TIMEOUT_SEC = 60
 
     def __init__(self, token: str, device_id: str, chat_ids: str | None = None, debug: bool = False,
-                 proxy_url: str | None = None, exclude_chat_ids: str | None = None):
+                 proxy_url: str | None = None, exclude_chat_ids: str | None = None, chats_count: int = 100):
         self.token = token
         self.device_id = device_id
         self.debug = debug
         self.proxy_url = proxy_url
+        self.chats_count = chats_count
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._seq = 0
         self._my_id = None
@@ -305,11 +307,19 @@ class MaxClient:
                 log.debug("<<< RESP  op=%-4s seq=%s", op, seq)
 
         # cmd=3 is an error response
-        elif cmd == 3 and seq in self._pending:
-            fut = self._pending.pop(seq)
-            if not fut.done():
-                fut.set_result({})
-            log.warning("<<< ERROR op=%-4s seq=%s | %s", op, seq, self._mask_sensitive(str(payload)))
+        elif cmd == 3:
+            if seq in self._pending:
+                fut = self._pending.pop(seq)
+                if not fut.done():
+                    fut.set_result({})
+            if op == OpCode.AUTH_SNAPSHOT:
+                log.error(
+                    "Max authentication failed: %s (%s). Please update MAX_TOKEN in .env!",
+                    payload.get("error") or payload.get("message"),
+                    payload.get("localizedMessage") or payload.get("title") or "Invalid token",
+                )
+            else:
+                log.warning("<<< ERROR op=%-4s seq=%s | %s", op, seq, self._mask_sensitive(str(payload)))
 
         # server-initiated events — not a reply to one of our requests
         else:
@@ -322,7 +332,7 @@ class MaxClient:
                 await self._send(
                     OpCode.AUTH_SNAPSHOT,
                     {
-                        "chatsCount": 10,
+                        "chatsCount": self.chats_count,
                         "interactive": True,
                         "token": self.token,
                     },
@@ -337,6 +347,9 @@ class MaxClient:
                 if self._on_ready_cb:
                     task = asyncio.create_task(self._on_ready_cb(payload))
                     task.add_done_callback(_log_task_exception)
+
+            elif op == OpCode.LOGOUT:
+                log.error("Max session logged out by server (opcode 20). MAX_TOKEN may have expired or been revoked.")
 
             elif op == OpCode.DISPATCH:
                 self._dispatch_counter += 1
@@ -384,10 +397,18 @@ class MaxClient:
         log.info("fetch_contacts(%s) → keys: %s", contact_ids, list(resp.keys()))
         return resp
 
-    async def send_message(self, chat_id, text: str, elements=None, attaches=None) -> dict:
+    async def send_message(
+        self,
+        chat_id,
+        text: str,
+        elements=None,
+        attaches=None,
+        reply_to_id: Any = None,
+    ) -> dict:
         """Send a message to a Max chat. Returns the server response.
 
         attaches: list of attach dicts as returned by upload_file().
+        reply_to_id: optional Max message ID to reply to.
         """
         if elements is None:
             elements = []
@@ -395,6 +416,15 @@ class MaxClient:
         message: dict[str, Any] = {"text": text, "cid": cid, "elements": elements}
         if attaches:
             message["attaches"] = attaches
+        if reply_to_id:
+            try:
+                mid = int(reply_to_id)
+            except (ValueError, TypeError):
+                mid = reply_to_id
+            message["link"] = {
+                "type": "REPLY",
+                "message": {"id": mid},
+            }
         resp = await self.cmd(
             OpCode.SEND_MESSAGE,
             {
@@ -403,8 +433,27 @@ class MaxClient:
                 "notify": True,
             },
         )
-        log.info("send_message(chat=%s, attaches=%d) → %s",
-                 chat_id, len(attaches or []), "OK" if resp else "FAIL")
+        log.info("send_message(chat=%s, reply_to=%s, attaches=%d) → %s",
+                 chat_id, reply_to_id, len(attaches or []), "OK" if resp else "FAIL")
+        return resp
+
+    async def delete_message(self, chat_id: Any, message_id: Any, for_me: bool = False) -> dict:
+        """Delete a message in Max by ID."""
+        try:
+            mid = int(message_id)
+        except (ValueError, TypeError):
+            mid = message_id
+        try:
+            cid = int(chat_id)
+        except (ValueError, TypeError):
+            cid = chat_id
+        payload = {
+            "chatId": cid,
+            "messageIds": [mid],
+            "forMe": for_me,
+        }
+        resp = await self.cmd(OpCode.MSG_DELETE, payload)
+        log.info("delete_message(chat=%s, message_id=%s) → %s", chat_id, message_id, "OK" if resp else "FAIL")
         return resp
 
     async def upload_file(self, data: bytes, filename: str) -> dict | None:

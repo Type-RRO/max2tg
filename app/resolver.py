@@ -16,12 +16,32 @@ class ContactResolver:
         self.chats: dict[Any, str] = {}
         self.chat_types: dict[Any, str] = {}
         self.users: dict[Any, str] = {}
+        self.chat_avatars: dict[Any, str] = {}
+        self.user_avatars: dict[Any, str] = {}
+        self.chat_peers: dict[Any, int] = {}
         self._client = client
         self._fetch_failed: set = set()
         self._my_id: Any = None
 
     def chat_name(self, chat_id: Any) -> str:
+        name = self.chats.get(chat_id)
+        if name and name.startswith("DM:"):
+            try:
+                peer_id = int(name[3:])
+                if peer_id in self.users:
+                    return self.users[peer_id]
+            except ValueError:
+                pass
         return self.chats.get(chat_id, str(chat_id))
+
+    def chat_avatar_url(self, chat_id: Any) -> str | None:
+        if chat_id in self.chat_avatars:
+            return self.chat_avatars[chat_id]
+        if self.is_dm(chat_id):
+            peer_id = self.chat_peers.get(chat_id)
+            if peer_id and peer_id in self.user_avatars:
+                return self.user_avatars[peer_id]
+        return None
 
     def is_dm(self, chat_id: Any) -> bool:
         return self.chat_types.get(chat_id) == "DIALOG"
@@ -76,6 +96,17 @@ class ContactResolver:
             if title:
                 self.chats[cid] = title
 
+            avatar_url = (
+                chat.get("iconUrl")
+                or chat.get("avatarUrl")
+                or chat.get("photoUrl")
+                or chat.get("icon")
+                or chat.get("avatar")
+                or chat.get("photo")
+            )
+            if avatar_url:
+                self.chat_avatars[cid] = str(avatar_url)
+
             participants = chat.get("participants", {})
             for uid_str in participants:
                 try:
@@ -83,7 +114,7 @@ class ContactResolver:
                 except (ValueError, TypeError):
                     pass
 
-            if not title and ctype == "DIALOG" and self._my_id:
+            if ctype == "DIALOG" and self._my_id:
                 peer_id = None
                 for uid in participants:
                     try:
@@ -94,7 +125,9 @@ class ContactResolver:
                         peer_id = uid_int
                         break
                 if peer_id:
-                    self.chats[cid] = f"DM:{peer_id}"
+                    self.chat_peers[cid] = peer_id
+                    if not title:
+                        self.chats[cid] = f"DM:{peer_id}"
 
         log.info(
             "Snapshot parsed: %d chats, my_id=%s, %d participant IDs to resolve",
@@ -127,17 +160,23 @@ class ContactResolver:
                 continue
             uid = c.get("id") or c.get("userId")
             name = self._extract_name_from_contact(c)
+            avatar = self._extract_avatar_from_contact(c)
             if uid is not None and name:
                 self.users[uid] = name
                 log.info("Resolved contact %s → %s", uid, name)
+            if uid is not None and avatar:
+                self.user_avatars[uid] = avatar
 
         # Maybe the response IS the contact (single user)
         if not contacts and resp.get("id"):
             uid = resp.get("id")
             name = self._extract_name_from_contact(resp)
+            avatar = self._extract_avatar_from_contact(resp)
             if uid and name:
                 self.users[uid] = name
                 log.info("Resolved contact %s → %s", uid, name)
+            if uid and avatar:
+                self.user_avatars[uid] = avatar
 
         # Walk the entire response for any name-bearing objects
         self._deep_extract(resp, depth=0)
@@ -148,14 +187,30 @@ class ContactResolver:
         if isinstance(obj, dict):
             uid = obj.get("id") or obj.get("userId")
             name = self._extract_name_from_contact(obj)
+            avatar = self._extract_avatar_from_contact(obj)
             if uid is not None and name and uid not in self.users:
                 self.users[uid] = name
                 log.info("Deep-resolved contact %s → %s", uid, name)
+            if uid is not None and avatar and uid not in self.user_avatars:
+                self.user_avatars[uid] = avatar
             for v in obj.values():
                 self._deep_extract(v, depth + 1)
         elif isinstance(obj, list):
             for item in obj:
                 self._deep_extract(item, depth + 1)
+
+    @staticmethod
+    def _extract_avatar_from_contact(c: dict) -> str | None:
+        avatar = (
+            c.get("photoUrl")
+            or c.get("avatarUrl")
+            or c.get("photo")
+            or c.get("avatar")
+            or c.get("largePhotoUrl")
+            or c.get("iconUrl")
+            or c.get("icon")
+        )
+        return str(avatar) if avatar else None
 
     @staticmethod
     def _extract_name_from_contact(c: dict) -> str:

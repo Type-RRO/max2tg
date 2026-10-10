@@ -362,3 +362,154 @@ class TestCreateMaxClientProxy:
     def test_exclude_chat_ids_defaults_to_empty(self):
         client = create_max_client("tok", "dev", sender=MagicMock())
         assert client.exclude_chat_ids == []
+
+
+# ---------------------------------------------------------------------------
+# Header formatting in topics, button omission, and reply linking
+# ---------------------------------------------------------------------------
+
+class TestForwardMessageInTopics:
+    @pytest.mark.asyncio
+    async def test_chat_title_omitted_when_in_topic(self):
+        from app.max_listener import _forward_single_message
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=10, sender_id=99, text="Hello world", message_id="msg1")
+        client = MagicMock()
+        client.chat_ids = [10, 20]  # multiple chats
+        sender = MagicMock()
+        sender.send = AsyncMock()
+
+        resolver = MagicMock()
+        resolver.resolve_user = AsyncMock(return_value="Alice")
+        resolver.is_dm.return_value = False
+        resolver.chat_name.return_value = "Group Chat Name"
+
+        topic_manager = MagicMock()
+        topic_manager.enabled = True
+        topic_manager.get_or_create_topic = AsyncMock(return_value=5)
+
+        await _forward_single_message(
+            msg, client, sender, resolver, topic_manager=topic_manager, reply_enabled=True
+        )
+
+        sender.send.assert_awaited_once()
+        sent_text = sender.send.await_args[0][0]
+        # Must contain sender name
+        assert "Alice" in sent_text
+        # Must NOT contain group chat title
+        assert "Group Chat Name" not in sent_text
+        # Inline reply button must be omitted by default
+        assert sender.send.await_args.kwargs.get("reply_markup") is None
+        # Must be sent to topic 5
+        assert sender.send.await_args.kwargs.get("thread_id") == 5
+
+    @pytest.mark.asyncio
+    async def test_chat_title_included_when_no_topics_and_multiple_chats(self):
+        from app.max_listener import _forward_single_message
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=10, sender_id=99, text="Hello world", message_id="msg1")
+        client = MagicMock()
+        client.chat_ids = [10, 20]
+        sender = MagicMock()
+        sender.send = AsyncMock()
+
+        resolver = MagicMock()
+        resolver.resolve_user = AsyncMock(return_value="Bob")
+        resolver.is_dm.return_value = False
+        resolver.chat_name.return_value = "Project Alpha"
+
+        await _forward_single_message(
+            msg, client, sender, resolver, topic_manager=None, reply_enabled=False
+        )
+
+        sender.send.assert_awaited_once()
+        sent_text = sender.send.await_args[0][0]
+        assert "Project Alpha" in sent_text
+        assert "Bob" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_native_reply_linking_used_when_in_msg_map(self):
+        from app.max_listener import _forward_single_message
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(
+            chat_id=10,
+            sender_id=99,
+            text="Reply text",
+            message_id="msg2",
+            link={"type": "REPLY", "message": {"id": "orig_max_1", "text": "Original text"}},
+        )
+        client = MagicMock()
+        client.chat_ids = [10]
+        sender = MagicMock()
+        sender.send = AsyncMock()
+
+        resolver = MagicMock()
+        resolver.resolve_user = AsyncMock(return_value="Alice")
+        resolver.is_dm.return_value = False
+        resolver.chat_name.return_value = "Chat"
+
+        msg_map = MagicMock()
+        msg_map.get_tg_id.return_value = 888  # TG message ID of original message
+
+        await _forward_single_message(
+            msg, client, sender, resolver, topic_manager=None, msg_map=msg_map
+        )
+
+        sender.send.assert_awaited_once()
+        assert sender.send.await_args.kwargs.get("reply_to_message_id") == 888
+        # Because native reply is used, blockquote is omitted
+        assert "<blockquote>" not in sender.send.await_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_header_and_body_separated_by_double_newline(self):
+        from app.max_listener import _forward_single_message
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=10, sender_id=99, text="Hello body", message_id="msg3")
+        client = MagicMock()
+        client.chat_ids = [10, 20]
+        sender = MagicMock()
+        sender.send = AsyncMock()
+
+        resolver = MagicMock()
+        resolver.resolve_user = AsyncMock(return_value="Charlie")
+        resolver.is_dm.return_value = False
+        resolver.chat_name.return_value = "Group 1"
+
+        await _forward_single_message(msg, client, sender, resolver, topic_manager=None)
+
+        sender.send.assert_awaited_once()
+        sent_text = sender.send.await_args[0][0]
+        # Sender is bold in group header, separated by \n\n from body
+        assert sent_text == "💬 <b>Group 1</b> | 👤 <b>Charlie</b>\n\nHello body"
+
+
+# ---------------------------------------------------------------------------
+# _header formatting
+# ---------------------------------------------------------------------------
+
+class TestHeaderFormatting:
+    def test_dm_header_has_bold_sender(self):
+        from app.max_listener import _header
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=1, sender_id=2)
+        assert _header(msg, "Alice", "", is_dm=True) == "✉ <b>Alice</b>"
+
+    def test_group_with_chat_label_has_bold_sender_and_chat(self):
+        from app.max_listener import _header
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=1, sender_id=2)
+        assert _header(msg, "Alice", "General", is_dm=False) == "💬 <b>General</b> | 👤 <b>Alice</b>"
+
+    def test_group_without_chat_label_has_bold_sender(self):
+        from app.max_listener import _header
+        from app.max_client import MaxMessage
+
+        msg = MaxMessage(chat_id=1, sender_id=2)
+        assert _header(msg, "Alice", "", is_dm=False) == "👤 <b>Alice</b>"
+

@@ -2,10 +2,12 @@
 __pycache__/
 *.pyc
 .venv/
-# Логи и дампы содержат тексты сообщений, имена контактов и подписанные
-# ссылки на файлы - коммитить их нельзя.
 logs/
 debug/
 .claude/
 *.code*
 *.cl*
+topics.json
+seen_messages.json
+messages_map.json
+*.tmp
