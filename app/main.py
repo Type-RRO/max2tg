@@ -43,6 +43,14 @@ def _log_polling_error(error: Exception) -> None:
         log.error("Telegram polling error! %s", error, exc_info=error)
 
 
+class _SuppressUpdaterCleanupFilter(logging.Filter):
+    """Suppress PTB Updater cleanup error on shutdown (e.g. NetworkError during get_updates cleanup)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "Error while calling `get_updates` one more time" not in msg
+
+
 class _SyncExecutor(ThreadPoolExecutor):
     """ThreadPoolExecutor that runs callables synchronously without spawning threads.
 
@@ -85,6 +93,10 @@ async def main():
     file_handler.setFormatter(fmt)
 
     logging.basicConfig(level=level, handlers=[console_handler, file_handler], force=True)
+    updater_filter = _SuppressUpdaterCleanupFilter()
+    console_handler.addFilter(updater_filter)
+    file_handler.addFilter(updater_filter)
+    logging.getLogger("telegram.ext.Updater").addFilter(updater_filter)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -166,11 +178,12 @@ async def main():
         pass
     finally:
         log.info("Shutting down...")
+        logging.getLogger("telegram.ext.Updater").setLevel(logging.CRITICAL)
         if syncer:
             try:
                 await syncer.stop()
-            except Exception:
-                log.exception("Error stopping syncer")
+            except Exception as e:
+                log.debug("Error stopping syncer: %s", e, exc_info=True)
         if tg_app:
             try:
                 if tg_app.updater and tg_app.updater.running:
@@ -178,16 +191,16 @@ async def main():
                 if tg_app.running:
                     await tg_app.stop()
                 await tg_app.shutdown()
-            except Exception:
-                log.exception("Error stopping tg_app")
+            except Exception as e:
+                log.debug("Error stopping tg_app: %s", e, exc_info=True)
         try:
             await client.stop()
-        except Exception:
-            log.exception("Error stopping client")
+        except Exception as e:
+            log.debug("Error stopping client: %s", e, exc_info=True)
         try:
             await sender.stop()
-        except Exception:
-            log.exception("Error stopping sender")
+        except Exception as e:
+            log.debug("Error stopping sender: %s", e, exc_info=True)
 
 
 if __name__ == "__main__":
