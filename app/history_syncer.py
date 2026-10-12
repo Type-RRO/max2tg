@@ -80,7 +80,7 @@ class HistorySyncer:
         if mid_str not in self._seen_ids:
             self._seen_ids.add(mid_str)
             self._seen_queue.append(mid_str)
-            if len(self._seen_queue) % 20 == 0:
+            if len(self._seen_queue) % 5 == 0:
                 self._save_seen()
 
     def get_chat_lock(self, chat_id: Any) -> asyncio.Lock:
