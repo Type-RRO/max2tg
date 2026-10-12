@@ -1,7 +1,7 @@
 import asyncio
 import io
 import logging
-from typing import Sequence
+from typing import Any, Sequence
 
 from telegram import (
     Bot,
