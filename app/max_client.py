@@ -146,6 +146,7 @@ class MaxClient:
         # fileId (as str) → future resolved when NOTIF_ATTACH says it is processed
         self._attach_waiters: dict[str, asyncio.Future] = {}
         self._on_disconnect_cb = None
+        self._stopped = False
         self.chat_ids: list[int] = []
         if chat_ids:
             self.chat_ids.extend(map(int, map(str.strip, chat_ids.split(','))))
@@ -218,77 +219,107 @@ class MaxClient:
             return None
         return ProxyConnector.from_url(self.proxy_url)
 
+    async def stop(self):
+        self._stopped = True
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+        if self._session and not self._session.closed:
+            await self._session.close()
+
     # ── main loop ──────────────────────────────────────────────────
 
     async def run(self):
+        self._stopped = False
         if self.debug:
             os.makedirs(DEBUG_DIR, exist_ok=True)
 
-        async with aiohttp.ClientSession(headers=_BROWSER_HEADERS, connector=self._make_connector()) as session:
-            self._session = session
-            while True:
-                try:
-                    log.info("Connecting to %s ...", self.WS_URL)
-                    async with session.ws_connect(
-                        self.WS_URL, headers=_WS_HEADERS
-                    ) as ws:
-                        self._ws = ws
-                        self._seq = 0
-                        self._pending.clear()
-
-                        log.info("Connected. Sending handshake...")
-                        await self._send(
-                            OpCode.HANDSHAKE,
-                            {
-                                "deviceId": self.device_id,
-                                "userAgent": {
-                                    "deviceType": "WEB",
-                                    "deviceName": "Chrome 131.0.0.0",
-                                    "headerUserAgent": _USER_AGENT,
-                                    "appVersion": "26.4.7",
-                                },
-                            },
-                        )
-
-                        self._heartbeat_task = asyncio.create_task(
-                            self._heartbeat_loop()
-                        )
-
-                        async for msg in ws:
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                await self._handle(json.loads(msg.data))
-                            elif msg.type in (
-                                aiohttp.WSMsgType.CLOSED,
-                                aiohttp.WSMsgType.ERROR,
-                            ):
-                                log.warning("WebSocket closed/error: %s", msg.type)
-                                break
-
-                except Exception:
-                    log.exception("Connection error")
-
-                finally:
-                    if self._heartbeat_task:
-                        self._heartbeat_task.cancel()
-                    for fut in self._pending.values():
-                        if not fut.done():
-                            fut.cancel()
-                    self._pending.clear()
-                    # Nobody will deliver NOTIF_ATTACH on a dead socket — release
-                    # uploads instead of leaving them to time out.
-                    for fut in self._attach_waiters.values():
-                        if not fut.done():
-                            fut.cancel()
-                    self._attach_waiters.clear()
-
-                if self._on_disconnect_cb:
+        try:
+            async with aiohttp.ClientSession(headers=_BROWSER_HEADERS, connector=self._make_connector()) as session:
+                self._session = session
+                while not self._stopped:
                     try:
-                        await self._on_disconnect_cb()
-                    except Exception:
-                        log.exception("on_disconnect callback error")
+                        log.info("Connecting to %s ...", self.WS_URL)
+                        async with session.ws_connect(
+                            self.WS_URL, headers=_WS_HEADERS
+                        ) as ws:
+                            self._ws = ws
+                            self._seq = 0
+                            self._pending.clear()
 
-                log.info("Reconnecting in %ds...", self.RECONNECT_SEC)
-                await asyncio.sleep(self.RECONNECT_SEC)
+                            log.info("Connected. Sending handshake...")
+                            await self._send(
+                                OpCode.HANDSHAKE,
+                                {
+                                    "deviceId": self.device_id,
+                                    "userAgent": {
+                                        "deviceType": "WEB",
+                                        "deviceName": "Chrome 131.0.0.0",
+                                        "headerUserAgent": _USER_AGENT,
+                                        "appVersion": "26.4.7",
+                                    },
+                                },
+                            )
+
+                            self._heartbeat_task = asyncio.create_task(
+                                self._heartbeat_loop()
+                            )
+
+                            async for msg in ws:
+                                if self._stopped:
+                                    break
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    await self._handle(json.loads(msg.data))
+                                elif msg.type in (
+                                    aiohttp.WSMsgType.CLOSED,
+                                    aiohttp.WSMsgType.ERROR,
+                                ):
+                                    log.warning("WebSocket closed/error: %s", msg.type)
+                                    break
+
+                    except asyncio.CancelledError:
+                        break
+                    except Exception:
+                        if self._stopped:
+                            break
+                        log.exception("Connection error")
+
+                    finally:
+                        if self._heartbeat_task and not self._heartbeat_task.done():
+                            self._heartbeat_task.cancel()
+                        for fut in self._pending.values():
+                            if not fut.done():
+                                fut.cancel()
+                        self._pending.clear()
+                        # Nobody will deliver NOTIF_ATTACH on a dead socket — release
+                        # uploads instead of leaving them to time out.
+                        for fut in self._attach_waiters.values():
+                            if not fut.done():
+                                fut.cancel()
+                        self._attach_waiters.clear()
+
+                    if self._stopped:
+                        break
+
+                    if self._on_disconnect_cb:
+                        try:
+                            await self._on_disconnect_cb()
+                        except asyncio.CancelledError:
+                            break
+                        except Exception:
+                            log.exception("on_disconnect callback error")
+
+                    if self._stopped:
+                        break
+
+                    log.info("Reconnecting in %ds...", self.RECONNECT_SEC)
+                    try:
+                        await asyncio.sleep(self.RECONNECT_SEC)
+                    except asyncio.CancelledError:
+                        break
+        except asyncio.CancelledError:
+            pass
 
     # ── event dispatcher ───────────────────────────────────────────
 

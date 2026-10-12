@@ -2,9 +2,14 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+# Allow running as a script directly (python app/main.py)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from telegram import Update
 from telegram.error import BadRequest, NetworkError
@@ -157,27 +162,68 @@ async def main():
     log.info("Starting Max listener...")
     try:
         await client.run()
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
     finally:
         log.info("Shutting down...")
         if syncer:
-            await syncer.stop()
+            try:
+                await syncer.stop()
+            except Exception:
+                log.exception("Error stopping syncer")
         if tg_app:
-            await tg_app.updater.stop()
-            await tg_app.stop()
-            await tg_app.shutdown()
-        await sender.stop()
+            try:
+                if tg_app.updater and tg_app.updater.running:
+                    await tg_app.updater.stop()
+                if tg_app.running:
+                    await tg_app.stop()
+                await tg_app.shutdown()
+            except Exception:
+                log.exception("Error stopping tg_app")
+        try:
+            await client.stop()
+        except Exception:
+            log.exception("Error stopping client")
+        try:
+            await sender.stop()
+        except Exception:
+            log.exception("Error stopping sender")
 
 
 if __name__ == "__main__":
+    import signal
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    main_task = loop.create_task(main())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, main_task.cancel)
+        except (NotImplementedError, RuntimeError):
+            pass
+
     try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        log.info("Stopped.")
+        loop.run_until_complete(main_task)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        if not main_task.done():
+            main_task.cancel()
+            try:
+                loop.run_until_complete(main_task)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass
     finally:
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            try:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
             pass
         loop.close()
+        log.info("Stopped.")
