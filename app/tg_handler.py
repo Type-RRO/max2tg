@@ -140,10 +140,19 @@ async def _on_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 def _with_sender_prefix(message, text: str) -> tuple[str, list]:
     """In a group, prefix the text with who wrote it and mark the name bold for Max."""
+    if not message or not getattr(message, "chat", None):
+        return text or "", []
     if message.chat.type not in [telegram.constants.ChatType.GROUP, telegram.constants.ChatType.SUPERGROUP]:
-        return text, []
-    name = message.from_user.full_name
-    return f"👤 {name}:\n{text}", [{"type": "STRONG", "length": len(name) + 1, "from": 2}]
+        return text or "", []
+    from_user = getattr(message, "from_user", None)
+    sender_chat = getattr(message, "sender_chat", None)
+    name = (
+        (getattr(from_user, "full_name", None) if from_user else None)
+        or (getattr(from_user, "username", None) if from_user else None)
+        or (getattr(sender_chat, "title", None) if sender_chat else None)
+        or "User"
+    )
+    return f"👤 {name}:\n{text or ''}", [{"type": "STRONG", "length": len(name) + 1, "from": 2}]
 
 
 def _extract_media(message) -> tuple[object, str] | None:
@@ -173,7 +182,7 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     topic_manager = context.bot_data.get("topic_manager")
     msg_map = context.bot_data.get("msg_map")
-    delivery_reaction = context.bot_data.get("delivery_reaction", "👍")
+    delivery_reaction = context.bot_data.get("delivery_reaction", "🆒")
     thread_id = update.effective_message.message_thread_id if update.effective_message else None
 
     if max_chat_id is None and topic_manager and thread_id:
@@ -242,7 +251,7 @@ async def _on_media_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     topic_manager = context.bot_data.get("topic_manager")
     msg_map = context.bot_data.get("msg_map")
-    delivery_reaction = context.bot_data.get("delivery_reaction", "👍")
+    delivery_reaction = context.bot_data.get("delivery_reaction", "🆒")
     thread_id = update.effective_message.message_thread_id if update.effective_message else None
 
     if max_chat_id is None and topic_manager and thread_id:
@@ -441,4 +450,8 @@ def build_tg_app(token: str, max_client: MaxClient, allowed_chat_id: str,
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & chat_filter, _on_text_reply))
     app.add_handler(MessageHandler(media_filter & chat_filter, _on_media_reply))
 
+    async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        log.exception("Unhandled Telegram exception while processing update %s: %s", update, context.error)
+
+    app.add_error_handler(_on_error)
     return app

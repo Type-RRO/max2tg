@@ -564,7 +564,7 @@ class TestTopicMessagesAndReplies:
         assert max_client.send_message.call_args[0][0] == 521818779
         assert "Hello from keyboard" in max_client.send_message.call_args[0][1]
         assert "reply_to_id" not in max_client.send_message.call_args.kwargs
-        update.effective_message.set_reaction.assert_awaited_once_with("👍")
+        update.effective_message.set_reaction.assert_awaited_once_with("🆒")
 
     @pytest.mark.asyncio
     async def test_reply_to_message_in_topic_passes_max_reply_id(self):
@@ -739,5 +739,34 @@ class TestSetDeliveryReaction:
         result = await _set_delivery_reaction(update, ctx, "👍")
         assert result is True
         ctx.bot.set_message_reaction.assert_awaited_once()
+
+
+class TestWithSenderPrefix:
+    def test_anonymous_admin_or_channel_sender(self):
+        from app.tg_handler import _with_sender_prefix
+        import telegram.constants
+
+        msg = MagicMock()
+        msg.chat.type = telegram.constants.ChatType.SUPERGROUP
+        msg.from_user = None
+        msg.sender_chat.title = "My Channel"
+
+        text, elements = _with_sender_prefix(msg, "Hello from channel")
+        assert "My Channel" in text
+        assert "Hello from channel" in text
+
+    def test_none_from_user_and_no_sender_chat(self):
+        from app.tg_handler import _with_sender_prefix
+        import telegram.constants
+
+        msg = MagicMock()
+        msg.chat.type = telegram.constants.ChatType.SUPERGROUP
+        msg.from_user = None
+        msg.sender_chat = None
+
+        text, elements = _with_sender_prefix(msg, "Anonymous text")
+        assert "User" in text
+        assert "Anonymous text" in text
+
 
 
