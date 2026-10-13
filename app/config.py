@@ -79,28 +79,37 @@ def load_settings() -> Settings:
     default_seen = os.path.join(data_dir, "seen_messages.json") if data_dir else "seen_messages.json"
     default_map = os.path.join(data_dir, "messages_map.json") if data_dir else "messages_map.json"
 
+    delivery_reaction_val = os.environ.get("DELIVERY_REACTION")
+    if delivery_reaction_val is None:
+        delivery_reaction = "👍"
+    else:
+        delivery_reaction_clean = delivery_reaction_val.strip().strip('"').strip("'")
+        if delivery_reaction_clean.lower() in ("", "none", "false", "off", "0"):
+            delivery_reaction = ""
+        else:
+            delivery_reaction = delivery_reaction_clean
     return Settings(
-        max_token=os.environ["MAX_TOKEN"],
-        max_device_id=os.environ["MAX_DEVICE_ID"],
-        tg_bot_token=os.environ["TG_BOT_TOKEN"],
-        tg_chat_id=os.environ["TG_CHAT_ID"],
-        max_chat_ids=os.environ.get("MAX_CHAT_IDS") or None,
-        max_exclude_chat_ids=os.environ.get("MAX_EXCLUDE_CHAT_IDS") or None,
-        max_proxy=max_proxy,
-        tg_proxy=os.environ.get("TG_PROXY") or None,
-        tg_read_timeout=int(os.environ.get("TG_READ_TIMEOUT", 0)) or None,
-        tg_write_timeout=int(os.environ.get("TG_WRITE_TIMEOUT", 0)) or None,
-        tg_media_write_timeout=int(os.environ.get("TG_MEDIA_WRITE_TIMEOUT", 0)) or None,
-        tg_base_url=tg_base_url,
-        debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),
-        reply_enabled=os.environ.get("REPLY_ENABLED", "").lower() in ("1", "true", "yes"),
-        enable_topics=os.environ.get("ENABLE_TOPICS", "true").lower() in ("1", "true", "yes"),
-        topics_file=os.environ.get("TOPICS_FILE", default_topics),
-        history_poll_interval=int(os.environ.get("HISTORY_POLL_INTERVAL", "60")),
-        history_messages_count=int(os.environ.get("HISTORY_MESSAGES_COUNT", "100")),
-        seen_messages_file=os.environ.get("SEEN_MESSAGES_FILE", default_seen),
-        max_chats_count=int(os.environ.get("MAX_CHATS_COUNT", "100")),
-        messages_map_file=os.environ.get("MESSAGES_MAP_FILE", default_map),
-        delivery_reaction=os.environ.get("DELIVERY_REACTION", "👍"),
-        show_reply_button=os.environ.get("SHOW_REPLY_BUTTON", "false").lower() in ("1", "true", "yes"),
-    )
+            max_token=os.environ["MAX_TOKEN"],
+            max_device_id=os.environ["MAX_DEVICE_ID"],
+            tg_bot_token=os.environ["TG_BOT_TOKEN"],
+            tg_chat_id=os.environ["TG_CHAT_ID"],
+            max_chat_ids=os.environ.get("MAX_CHAT_IDS") or None,
+            max_exclude_chat_ids=os.environ.get("MAX_EXCLUDE_CHAT_IDS") or None,
+            max_proxy=max_proxy,
+            tg_proxy=os.environ.get("TG_PROXY") or None,
+            tg_read_timeout=int(os.environ.get("TG_READ_TIMEOUT", 0)) or None,
+            tg_write_timeout=int(os.environ.get("TG_WRITE_TIMEOUT", 0)) or None,
+            tg_media_write_timeout=int(os.environ.get("TG_MEDIA_WRITE_TIMEOUT", 0)) or None,
+            tg_base_url=tg_base_url,
+            debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),
+            reply_enabled=os.environ.get("REPLY_ENABLED", "").lower() in ("1", "true", "yes"),
+            enable_topics=os.environ.get("ENABLE_TOPICS", "true").lower() in ("1", "true", "yes"),
+            topics_file=os.environ.get("TOPICS_FILE", default_topics),
+            history_poll_interval=int(os.environ.get("HISTORY_POLL_INTERVAL", "60")),
+            history_messages_count=int(os.environ.get("HISTORY_MESSAGES_COUNT", "100")),
+            seen_messages_file=os.environ.get("SEEN_MESSAGES_FILE", default_seen),
+            max_chats_count=int(os.environ.get("MAX_CHATS_COUNT", "100")),
+            messages_map_file=os.environ.get("MESSAGES_MAP_FILE", default_map),
+            delivery_reaction=delivery_reaction,
+            show_reply_button=os.environ.get("SHOW_REPLY_BUTTON", "false").lower() in ("1", "true", "yes"),
+        )

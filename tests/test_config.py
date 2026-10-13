@@ -229,3 +229,23 @@ class TestLoadSettingsMissing:
         with pytest.raises(SystemExit) as exc:
             _load_settings_with_env(_env(MAX_TOKEN=""))
         assert "MAX_TOKEN" in str(exc.value)
+
+
+class TestDeliveryReactionConfig:
+    def test_default_is_thumbs_up(self):
+        s = _load_settings_with_env(_VALID_ENV)
+        assert s.delivery_reaction == "👍"
+
+    def test_custom_reaction(self):
+        s = _load_settings_with_env(_env(DELIVERY_REACTION="🔥"))
+        assert s.delivery_reaction == "🔥"
+
+    def test_strips_quotes_and_spaces(self):
+        s = _load_settings_with_env(_env(DELIVERY_REACTION='  "👍"  '))
+        assert s.delivery_reaction == "👍"
+
+    @pytest.mark.parametrize("val", ["", "none", "false", "off", "0"])
+    def test_disabled_reactions(self, val):
+        s = _load_settings_with_env(_env(DELIVERY_REACTION=val))
+        assert s.delivery_reaction == ""
+

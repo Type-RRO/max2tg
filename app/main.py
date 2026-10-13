@@ -112,6 +112,7 @@ async def main():
         log.info("Using Max proxy: %s", settings.max_proxy.split("@")[-1])
     if settings.max_exclude_chat_ids:
         log.info("Excluding Max chats: %s", settings.max_exclude_chat_ids)
+    log.info("Delivery reaction: %s", settings.delivery_reaction if settings.delivery_reaction else "DISABLED")
 
     sender = TelegramSender(
         settings.tg_bot_token,

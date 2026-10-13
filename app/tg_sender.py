@@ -297,5 +297,5 @@ class TelegramSender:
             )
             return bool(res)
         except Exception as e:
-            log.debug("Failed to set reaction %s on msg %s: %s", emoji, message_id, e)
+            log.warning("Failed to set reaction %s on msg %s: %s", emoji, message_id, e)
             return False

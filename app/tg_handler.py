@@ -2,7 +2,7 @@ import html
 import logging
 from typing import Any
 
-from telegram import Update
+from telegram import ReactionTypeCustomEmoji, ReactionTypeEmoji, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -22,6 +22,71 @@ PENDING_REPLY_KEY = "pending_reply_chat_id"
 PENDING_REPLY_LABEL_KEY = "pending_reply_label"
 
 _ALLOWED_CHAT_ID_KEY = "allowed_chat_id"
+
+
+async def _set_delivery_reaction(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    delivery_reaction: str | None,
+) -> bool:
+    """Set the configured reaction emoji on the user's message as delivery confirmation.
+
+    Returns True if the reaction was successfully set, False otherwise.
+    """
+    if not delivery_reaction or not update.effective_message:
+        return False
+
+    clean_reaction = delivery_reaction.strip().strip('"').strip("'").replace("\ufe0f", "")
+    if clean_reaction.lower() in ("none", "false", "off", "0", ""):
+        return False
+
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    msg_id = update.effective_message.message_id
+
+    async def _do_react(emoji_val: str) -> bool:
+        if hasattr(update.effective_message, "set_reaction"):
+            try:
+                res = await update.effective_message.set_reaction(emoji_val)
+                return bool(res)
+            except RuntimeError:
+                pass
+        if context.bot and chat_id:
+            reaction_arg: Any = emoji_val
+            if emoji_val.isdigit():
+                reaction_arg = [ReactionTypeCustomEmoji(custom_emoji_id=emoji_val)]
+            elif emoji_val:
+                reaction_arg = [ReactionTypeEmoji(emoji=emoji_val)]
+            res = await context.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=msg_id,
+                reaction=reaction_arg,
+            )
+            return bool(res)
+        return False
+
+    try:
+        if await _do_react(clean_reaction):
+            log.info("Set delivery reaction %s on message %s", clean_reaction, msg_id)
+            return True
+    except Exception as e:
+        log.warning(
+            "Failed to set delivery reaction %r on message %s (chat %s): %s. "
+            "Note: Telegram requires the bot to be an Administrator in the group with reactions enabled.",
+            clean_reaction,
+            msg_id,
+            chat_id,
+            e,
+        )
+
+    if clean_reaction != "👍":
+        try:
+            if await _do_react("👍"):
+                log.info("Set fallback delivery reaction 👍 on message %s", msg_id)
+                return True
+        except Exception as e2:
+            log.warning("Fallback delivery reaction '👍' also failed on message %s: %s", msg_id, e2)
+
+    return False
 
 
 async def _on_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,20 +221,7 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if new_mid and update.effective_message:
                     msg_map.record(update.effective_message.message_id, new_mid, chat_id=max_chat_id)
 
-            reacted = False
-            if update.effective_message and hasattr(update.effective_message, "set_reaction"):
-                try:
-                    res = await update.effective_message.set_reaction(delivery_reaction)
-                    reacted = bool(res)
-                except Exception as e:
-                    log.debug("Failed to set reaction %s: %s", delivery_reaction, e)
-                    if delivery_reaction != "👍":
-                        try:
-                            res = await update.effective_message.set_reaction("👍")
-                            reacted = bool(res)
-                        except Exception:
-                            pass
-
+            reacted = await _set_delivery_reaction(update, context, delivery_reaction)
             if not reacted and (from_pending_reply or not thread_id):
                 safe_target = html.escape(str(label or max_chat_id))
                 await update.message.reply_text(f"✅ Отправлено → <b>{safe_target}</b>", parse_mode="HTML", disable_notification=True)
@@ -257,20 +309,7 @@ async def _on_media_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if new_mid and update.effective_message:
                     msg_map.record(update.effective_message.message_id, new_mid, chat_id=max_chat_id)
 
-            reacted = False
-            if update.effective_message and hasattr(update.effective_message, "set_reaction"):
-                try:
-                    res = await update.effective_message.set_reaction(delivery_reaction)
-                    reacted = bool(res)
-                except Exception as e:
-                    log.debug("Failed to set reaction %s: %s", delivery_reaction, e)
-                    if delivery_reaction != "👍":
-                        try:
-                            res = await update.effective_message.set_reaction("👍")
-                            reacted = bool(res)
-                        except Exception:
-                            pass
-
+            reacted = await _set_delivery_reaction(update, context, delivery_reaction)
             if not reacted and (from_pending_reply or not thread_id):
                 safe_target = html.escape(str(label or max_chat_id))
                 await update.message.reply_text(f"✅ Отправлено → <b>{safe_target}</b>", parse_mode="HTML", disable_notification=True)

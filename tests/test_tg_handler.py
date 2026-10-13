@@ -669,3 +669,75 @@ class TestTopicMessagesAndReplies:
         target_msg.delete.assert_awaited_once()
         cmd_msg.delete.assert_awaited_once()
 
+
+class TestSetDeliveryReaction:
+    @pytest.mark.asyncio
+    async def test_successful_reaction(self):
+        from app.tg_handler import _set_delivery_reaction
+
+        update = MagicMock()
+        update.effective_message.message_id = 42
+        update.effective_message.set_reaction = AsyncMock(return_value=True)
+        ctx = MagicMock()
+
+        result = await _set_delivery_reaction(update, ctx, "👍")
+        assert result is True
+        update.effective_message.set_reaction.assert_awaited_once_with("👍")
+
+    @pytest.mark.asyncio
+    async def test_normalizes_variation_selector_and_quotes(self):
+        from app.tg_handler import _set_delivery_reaction
+
+        update = MagicMock()
+        update.effective_message.message_id = 42
+        update.effective_message.set_reaction = AsyncMock(return_value=True)
+        ctx = MagicMock()
+
+        result = await _set_delivery_reaction(update, ctx, ' "👍\ufe0f" ')
+        assert result is True
+        update.effective_message.set_reaction.assert_awaited_once_with("👍")
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_thumbs_up_when_custom_fails(self):
+        from app.tg_handler import _set_delivery_reaction
+
+        update = MagicMock()
+        update.effective_message.message_id = 42
+        update.effective_message.set_reaction = AsyncMock(side_effect=[Exception("Invalid emoji"), True])
+        ctx = MagicMock()
+
+        result = await _set_delivery_reaction(update, ctx, "🎉")
+        assert result is True
+        assert update.effective_message.set_reaction.await_count == 2
+        calls = [c[0][0] for c in update.effective_message.set_reaction.await_args_list]
+        assert calls == ["🎉", "👍"]
+
+    @pytest.mark.asyncio
+    async def test_disabled_reaction_returns_false_without_calling_api(self):
+        from app.tg_handler import _set_delivery_reaction
+
+        update = MagicMock()
+        update.effective_message.set_reaction = AsyncMock()
+        ctx = MagicMock()
+
+        for val in ["", "none", "false", "0", None]:
+            result = await _set_delivery_reaction(update, ctx, val)
+            assert result is False
+            update.effective_message.set_reaction.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_context_bot_when_message_has_no_bot(self):
+        from app.tg_handler import _set_delivery_reaction
+
+        update = MagicMock()
+        update.effective_chat.id = -100123
+        update.effective_message.message_id = 99
+        update.effective_message.set_reaction = AsyncMock(side_effect=RuntimeError("no bot"))
+        ctx = MagicMock()
+        ctx.bot.set_message_reaction = AsyncMock(return_value=True)
+
+        result = await _set_delivery_reaction(update, ctx, "👍")
+        assert result is True
+        ctx.bot.set_message_reaction.assert_awaited_once()
+
+
