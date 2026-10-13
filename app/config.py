@@ -27,7 +27,7 @@ class Settings:
     seen_messages_file: str = "seen_messages.json"
     max_chats_count: int = 100
     messages_map_file: str = "messages_map.json"
-    delivery_reaction: str = "👍"
+    delivery_reaction: str = "🆒"
     show_reply_button: bool = False
 
 
@@ -81,7 +81,7 @@ def load_settings() -> Settings:
 
     delivery_reaction_val = os.environ.get("DELIVERY_REACTION")
     if delivery_reaction_val is None:
-        delivery_reaction = "👍"
+        delivery_reaction = "🆒"
     else:
         delivery_reaction_clean = delivery_reaction_val.strip().strip('"').strip("'")
         if delivery_reaction_clean.lower() in ("", "none", "false", "off", "0"):

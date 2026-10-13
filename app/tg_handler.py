@@ -407,7 +407,7 @@ async def _on_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def build_tg_app(token: str, max_client: MaxClient, allowed_chat_id: str,
                   proxy_url: str | None = None, read_timeout: int | None = None, write_timeout: int | None = None, base_url: str | None = None,
-                  topic_manager: Any = None, msg_map: Any = None, delivery_reaction: str = "👍") -> Application:
+                  topic_manager: Any = None, msg_map: Any = None, delivery_reaction: str = "🆒") -> Application:
     """Build and configure the Telegram Application with handlers."""
     builder = Application.builder().token(token)
     if proxy_url:

@@ -232,9 +232,9 @@ class TestLoadSettingsMissing:
 
 
 class TestDeliveryReactionConfig:
-    def test_default_is_thumbs_up(self):
+    def test_default_is_cool(self):
         s = _load_settings_with_env(_VALID_ENV)
-        assert s.delivery_reaction == "👍"
+        assert s.delivery_reaction == "🆒"
 
     def test_custom_reaction(self):
         s = _load_settings_with_env(_env(DELIVERY_REACTION="🔥"))
